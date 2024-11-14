@@ -1,20 +1,10 @@
-ARG OTEL_COLLECTOR_BUILD_IMAGE_NAME="alpine:latest"
-ARG OTEL_COLLECTOR_IMAGE_NAME="otel/opentelemetry-collector-contrib:latest"
+FROM otel/opentelemetry-collector-contrib:latest
 
-FROM ${OTEL_COLLECTOR_BUILD_IMAGE_NAME} AS collector-build
+# We only need the collector config
+COPY collector.yml /etc/otel-collector-config.yaml
 
-COPY ./docker/collector.yml /collector.yml
-COPY ./docker/configure-collector.sh /configure-collector.sh
+# Health check for Coolify
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:4318/health || exit 1
 
-ARG IN_DOCKER_GO
-ARG SSL
-RUN /configure-collector.sh
-
-FROM ${OTEL_COLLECTOR_IMAGE_NAME} AS collector
-
-COPY ./backend/localhostssl/server.crt /server.crt
-COPY ./backend/localhostssl/server.key /server.key
-COPY ./backend/localhostssl/server.pem /server.pem
-
-COPY --from=collector-build /collector.yml /etc/otel-collector-config.yaml
 CMD ["--config=/etc/otel-collector-config.yaml"]
