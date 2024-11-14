@@ -4,7 +4,7 @@ services:
   backend:
     build:
       context: .
-      dockerfile: backend.Dockerfile
+      dockerfile: docker/backend.Dockerfile
       args:
         - TARGETARCH=amd64
         - TARGETOS=linux
@@ -45,7 +45,7 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: frontend.Dockerfile
+      dockerfile: docker/frontend.Dockerfile
     restart: unless-stopped
     environment:
       - SERVICE_FQDN_FRONTEND_3000=/
