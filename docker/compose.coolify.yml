@@ -84,8 +84,6 @@ services:
     restart: unless-stopped
     volumes:
       - clickhouse-data:/var/lib/clickhouse
-    environment:
-      - SERVICE_FQDN_CLICKHOUSE_8123=/clickhouse
     healthcheck:
       test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
       interval: 30s
@@ -98,7 +96,6 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
     environment:
-      - SERVICE_FQDN_KAFKA_9092=/kafka
       - KAFKA_BROKER_ID=1
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
       - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
