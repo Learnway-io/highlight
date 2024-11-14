@@ -1,15 +1,4 @@
 receivers:
-    fluentforward:
-        endpoint: '0.0.0.0:24224'
-    tcplog:
-        listen_address: '0.0.0.0:34302'
-    syslog:
-        udp:
-            listen_address: '0.0.0.0:6513'
-        tcp:
-            listen_address: '0.0.0.0:6514'
-        protocol: 'rfc5424'
-        enable_octet_counting: true
     otlp:
         protocols:
             grpc:
@@ -21,8 +10,6 @@ receivers:
                 include_metadata: true
                 cors:
                     allowed_origins:
-                        # Can't use '*' with credentials because it fails CORS
-                        # validation on the preflight request.
                         - 'https://*'
                         - 'http://*'
                     allowed_headers:
@@ -39,42 +26,14 @@ receivers:
                         - 'Traceparent'
                         - 'Tracestate'
                     max_age: 7200
-    otlp/https:
-        protocols:
-            http:
-                endpoint: '0.0.0.0:8318'
-                max_request_body_size: 0
-                include_metadata: true
-                cors:
-                    allowed_origins:
-                        - 'https://*'
-                    allowed_headers:
-                        - 'X-Highlight-Request'
-                        - 'Origin'
-                        - 'Content-Type'
-                        - 'Accept'
-                        - 'Access-Control-Request-Headers'
-                        - 'Access-Control-Request-Method'
-                        - 'Access-Control-Allow-Origin'
-                        - 'Access-Control-Allow-Methods'
-                        - 'Access-Control-Max-Age'
-                        - 'Referer'
-                        - 'Traceparent'
-                        - 'Tracestate'
-                    max_age: 7200
-                tls:
-                    cert_file: '/server.crt'
-                    key_file: '/server.key'
+
 exporters:
     logging:
         sampling_initial: 60
         sampling_thereafter: 1000
     otlphttp:
-        endpoint: 'https://host.docker.internal:8082/otel'
-        auth:
-            authenticator: headers_setter
-        tls:
-            insecure_skip_verify: true
+        # Using internal service URL pattern from Coolify
+        endpoint: 'http://backend:8082/otel'
         timeout: 30s
         read_buffer_size: 32768
         write_buffer_size: 32768
@@ -87,6 +46,7 @@ exporters:
             initial_interval: 1s
             max_interval: 30s
             max_elapsed_time: 300s
+
 processors:
     batch:
         metadata_keys:
@@ -95,27 +55,29 @@ processors:
         timeout: 1s
         send_batch_size: 1000
         send_batch_max_size: 10000
+
 service:
     telemetry:
         logs:
-            level: 'debug'
+            level: 'info'
         metrics:
             address: '0.0.0.0:8888'
             level: detailed
     extensions: [headers_setter, health_check]
     pipelines:
         traces:
-            receivers: [otlp, otlp/https]
+            receivers: [otlp]
             processors: [batch]
             exporters: [otlphttp, logging]
         metrics:
-            receivers: [otlp, otlp/https]
+            receivers: [otlp]
             processors: [batch]
             exporters: [otlphttp, logging]
         logs:
-            receivers: [otlp, otlp/https, fluentforward, tcplog, syslog]
+            receivers: [otlp]
             processors: [batch]
             exporters: [otlphttp, logging]
+
 extensions:
     headers_setter:
         headers:

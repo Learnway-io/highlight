@@ -1,0 +1,168 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+      args:
+        - TARGETARCH=amd64
+        - TARGETOS=linux
+    restart: unless-stopped
+    volumes:
+      - highlight-data:/highlight-data
+    environment:
+      - SERVICE_FQDN_BACKEND_8082=/api
+      - CLICKHOUSE_ADDRESS=clickhouse:9000
+      - KAFKA_SERVERS=kafka:9092
+      - PSQL_HOST=postgres
+      - REDIS_EVENTS_STAGING_ENDPOINT=redis:6379
+      - KAFKA_TOPIC=${SERVICE_KAFKA_TOPIC-dev}
+      - CLICKHOUSE_DATABASE=${SERVICE_CLICKHOUSE_DB-default}
+      - CLICKHOUSE_USERNAME=${SERVICE_USER_CLICKHOUSE}
+      - CLICKHOUSE_PASSWORD=${SERVICE_PASSWORD_CLICKHOUSE}
+      - PSQL_DB=${SERVICE_POSTGRES_DB-postgres}
+      - PSQL_USER=${SERVICE_USER_POSTGRES}
+      - PSQL_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      clickhouse:
+        condition: service_started
+      redis:
+        condition: service_started
+    command:
+      - /build/backend
+      - -runtime=graph
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+    restart: unless-stopped
+    environment:
+      - SERVICE_FQDN_FRONTEND_3000=/
+      - REACT_APP_PRIVATE_GRAPH_URI=${SERVICE_URL_BACKEND_8082}
+      - REACT_APP_PUBLIC_GRAPH_URI=${SERVICE_URL_BACKEND_8082}
+      - REACT_APP_FRONTEND_URI=${SERVICE_URL_FRONTEND_3000}
+      - REACT_APP_OTLP_ENDPOINT=${SERVICE_URL_COLLECTOR_4318}
+      - REACT_APP_AUTH_MODE=${SERVICE_AUTH_MODE-password}
+      - REACT_APP_DISABLE_ANALYTICS=${DISABLE_ANALYTICS-false}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"] # Changed to wget as it's available in Alpine
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      - backend
+
+  collector:
+    image: ${OTEL_COLLECTOR_IMAGE_NAME-otel/opentelemetry-collector-contrib:latest}
+    restart: unless-stopped
+    environment:
+      - SERVICE_FQDN_COLLECTOR_4318=/otel
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - type: bind
+        source: ./collector.yml
+        target: /etc/otel-collector-config.yaml
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4318"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  clickhouse:
+    image: ${CLICKHOUSE_IMAGE_NAME-clickhouse/clickhouse-server:24.3.6.48-alpine}
+    restart: unless-stopped
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    environment:
+      - SERVICE_FQDN_CLICKHOUSE_8123=/clickhouse
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  kafka:
+    image: ${KAFKA_IMAGE_NAME-confluentinc/cp-kafka:7.7.0}
+    restart: unless-stopped
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    environment:
+      - SERVICE_FQDN_KAFKA_9092=/kafka
+      - KAFKA_BROKER_ID=1
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_LOG_RETENTION_HOURS=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+    depends_on:
+      - zookeeper
+    healthcheck:
+      test: nc -z localhost 9092 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  zookeeper:
+    image: ${ZOOKEEPER_IMAGE_NAME-confluentinc/cp-zookeeper:7.7.0}
+    restart: unless-stopped
+    volumes:
+      - zoo-data:/var/lib/zookeeper/data
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+      - ZOOKEEPER_TICK_TIME=2000
+    healthcheck:
+      test: nc -z localhost 2181 || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: ${REDIS_IMAGE_NAME-redis:alpine}
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    command:
+      - redis-server
+      - --save 60 1
+      - --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  postgres:
+    image: ${POSTGRES_IMAGE_NAME-ankane/pgvector:v0.5.1}
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${SERVICE_USER_POSTGRES}
+      - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - type: bind
+        source: ./scripts/migrations/init.sql
+        target: /docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  highlight-data:
+  redis-data:
+  postgres-data:
+  clickhouse-data:
+  kafka-data:
+  zoo-data:
